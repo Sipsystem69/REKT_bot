@@ -25,7 +25,7 @@ WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 5000))
 
 # Use correct Bybit WebSocket endpoint
-EXCHANGE_WS = "wss://stream.bybit.com/realtime"
+EXCHANGE_WS = "wss://stream.bybit.com/realtime_public"
 
 # ---- FSM States ----
 class Settings(StatesGroup):
