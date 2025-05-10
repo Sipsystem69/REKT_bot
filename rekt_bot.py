@@ -6,7 +6,7 @@ import json
 import requests
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
-from aiogram.utils.executor import start_webhook
+from aiogram.utils import executor
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
@@ -54,13 +54,14 @@ def main_menu() -> InlineKeyboardMarkup:
     )
     return kb
 
+
 def list_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("🟡 Все токены",  callback_data="list_all"),
-        InlineKeyboardButton("🟡 Без топ 20", callback_data="list_no_top20"),
-        InlineKeyboardButton("🟡 Без топ 50", callback_data="list_no_top50"),
-        InlineKeyboardButton("❌ Отмена",     callback_data="list_cancel"),
+        InlineKeyboardButton("🟡 Все токены",    callback_data="list_all"),
+        InlineKeyboardButton("🟡 Без топ 20",   callback_data="list_no_top20"),
+        InlineKeyboardButton("🟡 Без топ 50",   callback_data="list_no_top50"),
+        InlineKeyboardButton("❌ Отмена",       callback_data="list_cancel"),
     )
     return kb
 
@@ -116,61 +117,55 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
 
 # ---- Liquidation listener with retry & V5 subscription ----
 async def liquidation_listener():
-    # 1) Получаем список всех фьючерсных символов USDT (category=linear)
+    # Получаем список символов
     try:
-        r = requests.get("https://api.bybit.com/v5/market/instruments-info?category=linear")
-        r.raise_for_status()
-        insts = r.json()["result"]["list"]
-        symbols = [inst["symbol"] for inst in insts]
-    except Exception as e:
-        print(f"❌ Не удалось получить список символов: {e}")
+        resp = requests.get(
+            "https://api.bybit.com/v5/market/instruments-info?category=linear"
+        )
+        resp.raise_for_status()
+        symbols = [item["symbol"] for item in resp.json()["result"]["list"]]
+    except Exception as err:
+        print(f"❌ Ошибка получения символов: {err}")
         symbols = []
 
-    topics = [f"allLiquidation.{sym}" for sym in symbols]
+    topics = [f"allLiquidation.{s}" for s in symbols]
+
     while True:
         try:
             async with websockets.connect(EXCHANGE_WS) as ws:
-                # 2) Подписываемся на все каналы allLiquidation.{symbol}
-                await ws.send(json.dumps({"op": "subscribe", "args": topics}))
-
-                # 3) Слушаем и фильтруем по порогу
+                await ws.send(json.dumps({"op":"subscribe","args":topics}))
                 while True:
                     raw = await ws.recv()
                     data = json.loads(raw)
                     topic = data.get("topic", "")
-                    if topic.startswith("allLiquidation") and "data" in data:
-                        for item in data["data"]:
-                            vol   = float(item["v"])
+                    if topic.startswith("allLiquidation") and data.get("data"):
+                        for itm in data["data"]:
+                            vol = float(itm["v"])
                             if vol < limits.get(CHAT_ID, 100_000.0):
                                 continue
-                            sym   = item["s"]
-                            side  = item["S"]
-                            price = float(item["p"])
-                            ts    = datetime.fromtimestamp(item["T"]/1000).strftime("%Y-%m-%d %H:%M:%S")
                             text = (
-                                f"💥 Ликвидация {sym}\n"
-                                f"• Сторона: {side}\n"
+                                f"💥 Ликвидация {itm['s']}\n"
+                                f"• Сторона: {itm['S']}\n"
                                 f"• Объём: ${vol:,.2f}\n"
-                                f"• Цена: {price}\n"
-                                f"• Время: {ts}"
+                                f"• Цена: {float(itm['p'])}\n"
+                                f"• Время: {datetime.fromtimestamp(itm['T']/1000)}"
                             )
                             await bot.send_message(CHAT_ID, text)
         except Exception as e:
             print(f"WebSocket error: {e}. Reconnecting in 5s…")
             await asyncio.sleep(5)
 
-# ---- Webhook setup ----
-async def on_startup(dp):
+# ---- Startup & shutdown ----
+async def on_startup(dp_):
     await bot.set_webhook(WEBHOOK_URL)
-    # фоновый таск
     asyncio.create_task(liquidation_listener())
 
-async def on_shutdown(dp):
+async def on_shutdown(dp_):
     await bot.delete_webhook()
 
 # ---- Entry point ----
 if __name__ == "__main__":
-    start_webhook(
+    executor.start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
         skip_updates=True,
