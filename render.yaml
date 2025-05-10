@@ -1,0 +1,11 @@
+services:
+  - type: web           # бесплатный план
+    name: rekt_bot      # теперь совпадает с именем скрипта
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python rekt_bot.py
+    envVars:
+      - key: BOT_TOKEN
+      - key: CHAT_ID
+      - key: WEBHOOK_URL
