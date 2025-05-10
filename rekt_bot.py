@@ -16,7 +16,7 @@ import websockets
 load_dotenv()
 BOT_TOKEN    = os.getenv("BOT_TOKEN")
 CHAT_ID      = int(os.getenv("CHAT_ID"))
-WEBHOOK_HOST = os.getenv("WEBHOOK_URL")              # e.g. "https://your-app.onrender.com"
+WEBHOOK_HOST = os.getenv("WEBHOOK_URL")      # e.g. "https://your-app.onrender.com"
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL  = WEBHOOK_HOST + WEBHOOK_PATH
 
@@ -24,7 +24,8 @@ WEBHOOK_URL  = WEBHOOK_HOST + WEBHOOK_PATH
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 5000))
 
-EXCHANGE_WS = "wss://stream.bybit.com/realtime_public"
+# Use correct Bybit WebSocket endpoint
+EXCHANGE_WS = "wss://stream.bybit.com/realtime"
 
 # ---- FSM States ----
 class Settings(StatesGroup):
@@ -34,8 +35,8 @@ class ListSettings(StatesGroup):
     choosing_mode = State()
 
 # ---- In-memory storage ----
-limits = {}        # chat_id -> float threshold
-list_modes = {}    # chat_id -> str mode
+limits = {}     # chat_id -> float threshold
+list_modes = {} # chat_id -> str mode
 
 # ---- Bot & Dispatcher ----
 bot = Bot(token=BOT_TOKEN)
@@ -51,14 +52,13 @@ def main_menu() -> InlineKeyboardMarkup:
     )
     return kb
 
-
 def list_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("🟡 Все токены",    callback_data="list_all"),
-        InlineKeyboardButton("🟡 Без топ 20",   callback_data="list_no_top20"),
-        InlineKeyboardButton("🟡 Без топ 50",   callback_data="list_no_top50"),
-        InlineKeyboardButton("❌ Отмена",       callback_data="list_cancel"),
+        InlineKeyboardButton("🟡 Все токены",  callback_data="list_all"),
+        InlineKeyboardButton("🟡 Без топ 20", callback_data="list_no_top20"),
+        InlineKeyboardButton("🟡 Без топ 50", callback_data="list_no_top50"),
+        InlineKeyboardButton("❌ Отмена",     callback_data="list_cancel"),
     )
     return kb
 
@@ -112,27 +112,31 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
         await bot.send_message(cq.from_user.id, f"✅ {desc}", reply_markup=main_menu())
     await state.finish()
 
-# ---- Liquidation listener ----
+# ---- Liquidation listener with retry ----
 async def liquidation_listener():
-    async with websockets.connect(EXCHANGE_WS) as ws:
-        await ws.send(json.dumps({"op": "subscribe", "args": ["liquidation"]}))
-        while True:
-            raw = await ws.recv()
-            data = json.loads(raw)
-            if data.get("topic") == "liquidation" and "data" in data:
-                for item in data["data"]:
-                    vol = float(item["qty"]) * float(item["price"])
-                    threshold = limits.get(CHAT_ID, 100_000.0)
-                    if vol >= threshold:
-                        text = (
-                            f"💥 Ликвидация {item['symbol']}\n"
-                            f"• Сторона: {item['side']}\n"
-                            f"• Объём: ${vol:,.2f}\n"
-                            f"• Цена: {item['price']}\n"
-                            f"• Время: {item['time']}"
-                        )
-                        await bot.send_message(CHAT_ID, text)
-            await asyncio.sleep(0.01)
+    while True:
+        try:
+            async with websockets.connect(EXCHANGE_WS) as ws:
+                await ws.send(json.dumps({"op": "subscribe", "args": ["liquidation"]}))
+                while True:
+                    raw = await ws.recv()
+                    data = json.loads(raw)
+                    if data.get("topic") == "liquidation" and "data" in data:
+                        for item in data["data"]:
+                            vol = float(item["qty"]) * float(item["price"])
+                            threshold = limits.get(CHAT_ID, 100_000.0)
+                            if vol >= threshold:
+                                text = (
+                                    f"💥 Ликвидация {item['symbol']}\n"
+                                    f"• Сторона: {item['side']}\n"
+                                    f"• Объём: ${vol:,.2f}\n"
+                                    f"• Цена: {item['price']}\n"
+                                    f"• Время: {item['time']}"
+                                )
+                                await bot.send_message(CHAT_ID, text)
+        except Exception as e:
+            print(f"WebSocket error: {e}. Reconnecting in 5s...")
+            await asyncio.sleep(5)
 
 # ---- Webhook setup ----
 async def on_startup(dp):
