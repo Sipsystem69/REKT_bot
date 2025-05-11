@@ -71,6 +71,16 @@ def list_menu() -> InlineKeyboardMarkup:
 # ---- Handlers ----
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
+    print(f"🔔 Received /start from chat {msg.chat.id}")  # debug
+    limits[msg.chat.id]     = limits.get(msg.chat.id, 100_000.0)
+    list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
+    await msg.answer(
+        "Привет! Я сканирую ByBit на предмет ликвидаций.
+
+"
+        "Выберите действие:",
+        reply_markup=main_menu()
+    )(msg: types.Message):
     limits[msg.chat.id]     = limits.get(msg.chat.id, 100_000.0)
     list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
     await msg.answer(
