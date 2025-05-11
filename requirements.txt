@@ -1,4 +1,4 @@
 aiogram==2.25.1
-websockets
-python-dotenv
-requests
+websockets==15.0.1
+python-dotenv==1.1.0
+requests==2.32.3
