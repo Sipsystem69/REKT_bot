@@ -130,6 +130,12 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
         list_modes[cq.from_user.id] = mode
     await state.finish()
 
+# ---- Fallback handler (ensures menu appears)
+@dp.message_handler()
+async def fallback(msg: types.Message):
+    # Показать главное меню при любом сообщении, если /start не сработал
+    await msg.answer("Выберите действие:", reply_markup=main_menu())
+
 # ---- WebSocket listener ----
 async def liquidation_listener():
     while True:
