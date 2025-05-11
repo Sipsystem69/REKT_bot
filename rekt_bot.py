@@ -22,11 +22,11 @@ WEBHOOK_HOST = os.getenv("WEBHOOK_URL")      # https://your-app.onrender.com
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL  = WEBHOOK_HOST + WEBHOOK_PATH
 
-# Render port
+# Render port binding
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 5000))
 
-# Bybit public liquidation endpoint
+# Bybit public liquidation endpoint (V2)
 EXCHANGE_WS = "wss://stream.bybit.com/realtime_public"
 
 # ---- FSM States ----
@@ -37,12 +37,13 @@ class ListSettings(StatesGroup):
     choosing_mode = State()
 
 # ---- In-memory storage ----
-limits     = {}
-list_modes = {}
+limits     = {}  # chat_id -> float threshold in USD
+list_modes = {}  # chat_id -> str mode
 
-# ---- Bot init ----
-bot = Bot(token=BOT_TOKEN)
-dp  = Dispatcher(bot, storage=MemoryStorage())
+# ---- Bot & Dispatcher ----
+bot     = Bot(token=BOT_TOKEN)
+storage = MemoryStorage()
+dp      = Dispatcher(bot, storage=storage)
 
 # ---- Keyboards ----
 def main_menu() -> InlineKeyboardMarkup:
@@ -51,15 +52,31 @@ def main_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton("💲 Лимит ByBit", callback_data="set_limit"),
         InlineKeyboardButton("⚫️ Список ByBit", callback_data="set_list"),
     )
+    # Coinglass link for manual reference
+    kb.add(
+        InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com")
+    )
+    return kb
+
+
+def list_menu() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("🟡 Все токены",  callback_data="list_all"),
+        InlineKeyboardButton("🟡 Без топ 20", callback_data="list_no_top20"),
+        InlineKeyboardButton("🟡 Без топ 50", callback_data="list_no_top50"),
+        InlineKeyboardButton("❌ Отмена",     callback_data="list_cancel"),
+    )
     return kb
 
 # ---- Handlers ----
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
+    # Initialize defaults
     limits[msg.chat.id]     = limits.get(msg.chat.id, 100_000.0)
     list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
     await msg.answer(
-        "Привет! Я сканирую ByBit на предмет ликвидаций.\n\n" +
+        "Привет! Я сканирую ByBit на предмет ликвидаций.\n\n"
         "Выберите действие:",
         reply_markup=main_menu()
     )
@@ -68,49 +85,70 @@ async def cmd_start(msg: types.Message):
 async def callback_set_limit(cq: types.CallbackQuery):
     await cq.answer()
     await bot.send_message(cq.from_user.id,
-        "Введите минимальный объём ликвидаций (USD):")
+        "Введите минимальный объём ликвидаций (USD). Например, 15000 или 15k → $15 000:")
     await Settings.waiting_for_limit.set()
 
 @dp.message_handler(state=Settings.waiting_for_limit)
 async def process_limit(msg: types.Message, state: FSMContext):
-    text = msg.text.replace(',', '').replace('$', '').strip()
+    text = msg.text.replace(',', '').replace('$', '').strip().lower()
     try:
-        value = float(text)
+        if text.endswith('k'):
+            value = float(text[:-1]) * 1_000
+        else:
+            num = float(text)
+            value = num * 1_000 if num < 1000 else num
         limits[msg.chat.id] = value
         await msg.answer(f"✅ Порог установлен: от ${value:,.2f}", reply_markup=main_menu())
         await state.finish()
-    except:
+    except ValueError:
         await msg.answer("❌ Не похоже на число. Попробуйте ещё раз:")
 
 @dp.callback_query_handler(lambda c: c.data == "set_list")
 async def callback_set_list(cq: types.CallbackQuery):
     await cq.answer()
-    # omitted for brevity
-    await cq.answer()  # placeholder
+    await bot.send_message(cq.from_user.id,
+        "Выберите режим списка ликвидаций:", reply_markup=list_menu())
+    await ListSettings.choosing_mode.set()
 
-# ---- WebSocket listener ----
+@dp.callback_query_handler(lambda c: c.data.startswith("list_"), state=ListSettings.choosing_mode)
+async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
+    await cq.answer()
+    mode = cq.data
+    if mode == "list_cancel":
+        await bot.send_message(cq.from_user.id, "❌ Отмена.", reply_markup=main_menu())
+    else:
+        desc = {
+            "list_all":      "🟡 Режим: все токены",
+            "list_no_top20": "🟡 Режим: без топ 20",
+            "list_no_top50": "🟡 Режим: без топ 50",
+        }[mode]
+        list_modes[cq.from_user.id] = mode
+        await bot.send_message(cq.from_user.id, f"✅ {desc}", reply_markup=main_menu())
+    await state.finish()
+
+# ---- WebSocket liquidation listener ----
 async def liquidation_listener():
     while True:
         try:
             async with websockets.connect(EXCHANGE_WS) as ws:
-                await ws.send(json.dumps({"op":"subscribe","args":["liquidation"]}))
+                await ws.send(json.dumps({"op": "subscribe", "args": ["liquidation"]}))
                 while True:
                     raw = await ws.recv()
                     data = json.loads(raw)
                     if data.get("topic") == "liquidation":
-                        for item in data.get("data", []):
-                            vol = float(item['qty']) * float(item['price'])
+                        for itm in data.get("data", []):
+                            vol = float(itm["qty"]) * float(itm["price"])
                             if vol < limits.get(CHAT_ID, 100_000.0):
                                 continue
-                            symbol = item['symbol']
-                            # Coinglass link per instrument
+                            symbol = itm["symbol"]
+                            # hyperlink to Coinglass for this instrument
                             cg_url = f"https://www.coinglass.com/liquidation/{symbol}"
-                            ts = datetime.fromtimestamp(item['time'] / 1000).strftime("%Y-%m-%d %H:%M:%S")
+                            ts = datetime.fromtimestamp(itm["time"]/1000).strftime("%Y-%m-%d %H:%M:%S")
                             text = (
                                 f"💥 Ликвидация <a href=\"{cg_url}\">{symbol}</a>\n"
-                                f"• Сторона: {item['side']}\n"
+                                f"• Сторона: {itm['side']}\n"
                                 f"• Объём: ${vol:,.2f}\n"
-                                f"• Цена: {item['price']}\n"
+                                f"• Цена: {itm['price']}\n"
                                 f"• Время: {ts}"
                             )
                             await bot.send_message(
@@ -119,10 +157,10 @@ async def liquidation_listener():
                                 disable_web_page_preview=True
                             )
         except Exception as e:
-            print(f"WS error: {e}, reconnect in 5s")
+            print(f"WS error: {e}. Reconnecting in 5s…")
             await asyncio.sleep(5)
 
-# ---- Startup/shutdown ----
+# ---- Startup / shutdown ----
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(liquidation_listener())
@@ -130,6 +168,7 @@ async def on_startup(dp):
 async def on_shutdown(dp):
     await bot.delete_webhook()
 
+# ---- Entry point ----
 if __name__ == "__main__":
     start_webhook(
         dispatcher=dp,
