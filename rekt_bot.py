@@ -3,10 +3,8 @@
 import os
 import asyncio
 import json
-import requests
-from datetime import datetime
 from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
+from aiogram.utils.executor import start_webhook
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.dispatcher.filters.state import State, StatesGroup
@@ -18,16 +16,14 @@ import websockets
 load_dotenv()
 BOT_TOKEN    = os.getenv("BOT_TOKEN")
 CHAT_ID      = int(os.getenv("CHAT_ID"))
-WEBHOOK_HOST = os.getenv("WEBHOOK_URL")      # e.g. "https://your-app.onrender.com"
+WEBHOOK_HOST = os.getenv("WEBHOOK_URL")      # https://your-app.onrender.com
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL  = WEBHOOK_HOST + WEBHOOK_PATH
 
-# Render provides port via $PORT
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 5000))
 
-# V5 endpoint for USDT futures
-EXCHANGE_WS = "wss://stream.bybit.com/v5/public/linear"
+EXCHANGE_WS = "wss://stream.bybit.com/realtime_public"
 
 # ---- FSM States ----
 class Settings(StatesGroup):
@@ -36,14 +32,14 @@ class Settings(StatesGroup):
 class ListSettings(StatesGroup):
     choosing_mode = State()
 
-# ---- In-memory storage ----
-limits     = {}  # chat_id -> float threshold in USD
-list_modes = {}  # chat_id -> str mode
+# ---- Storage ----
+limits     = {}
+list_modes = {}
 
-# ---- Bot & Dispatcher ----
-bot     = Bot(token=BOT_TOKEN)
+# ---- Bot init ----
+bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
-dp      = Dispatcher(bot, storage=storage)
+dp = Dispatcher(bot, storage=storage)
 
 # ---- Keyboards ----
 def main_menu() -> InlineKeyboardMarkup:
@@ -52,11 +48,8 @@ def main_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton("💲 Лимит ByBit", callback_data="set_limit"),
         InlineKeyboardButton("⚫️ Список ByBit", callback_data="set_list"),
     )
-    kb.add(
-        InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com")
-    )
+    kb.add(InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com"))
     return kb
-
 
 def list_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
@@ -82,36 +75,30 @@ async def cmd_start(msg: types.Message):
 @dp.callback_query_handler(lambda c: c.data == "set_limit")
 async def callback_set_limit(cq: types.CallbackQuery):
     await cq.answer()
-    await bot.send_message(cq.from_user.id,
-        "Введите минимальный объём ликвидаций (в тысячах USD). Например, 15 или 15k → $15 000:")
+    await bot.send_message(cq.from_user.id, "Введите минимальный объём ликвидаций (USD):")
     await Settings.waiting_for_limit.set()
 
 @dp.message_handler(state=Settings.waiting_for_limit, content_types=types.ContentTypes.TEXT)
 async def process_limit(msg: types.Message, state: FSMContext):
-    text = msg.text.strip().lower().replace(",", "").replace("$", "")
+    text = msg.text.strip().replace(",", "").replace("$", "")
     try:
-        if text.endswith("k"):
-            value = float(text[:-1]) * 1_000
-        else:
-            num = float(text)
-            value = num * 1_000 if num < 1_000 else num
+        value = float(text)
         limits[msg.chat.id] = value
         await msg.answer(f"✅ Порог установлен: от ${value:,.2f}", reply_markup=main_menu())
         await state.finish()
     except ValueError:
-        await msg.answer("❌ Не похоже на число. Введите, например, 15 или 15k:")
+        await msg.answer("❌ Не похоже на число. Попробуйте ещё раз:")
 
 @dp.callback_query_handler(lambda c: c.data == "set_list")
 async def callback_set_list(cq: types.CallbackQuery):
     await cq.answer()
-    await bot.send_message(cq.from_user.id,
-        "Выберите режим списка ликвидаций:", reply_markup=list_menu())
+    await bot.send_message(cq.from_user.id, "Выберите режим списка ликвидаций:", reply_markup=list_menu())
     await ListSettings.choosing_mode.set()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("list_"), state=ListSettings.choosing_mode)
 async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
-    mode = cq.data
     await cq.answer()
+    mode = cq.data
     if mode == "list_cancel":
         await bot.send_message(cq.from_user.id, "❌ Отмена.", reply_markup=main_menu())
     else:
@@ -124,60 +111,44 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
         await bot.send_message(cq.from_user.id, f"✅ {desc}", reply_markup=main_menu())
     await state.finish()
 
-# ---- Liquidation listener ----
+# ---- WebSocket listener ----
 async def liquidation_listener():
-    try:
-        resp = requests.get(
-            "https://api.bybit.com/v5/market/instruments-info?category=linear"
-        )
-        resp.raise_for_status()
-        symbols = [itm["symbol"] for itm in resp.json()["result"]["list"]]
-    except Exception as err:
-        print(f"❌ Ошибка получения символов: {err}")
-        symbols = []
-    topics = [f"allLiquidation.{s}" for s in symbols]
-    while True:
-        try:
-            async with websockets.connect(EXCHANGE_WS) as ws:
-                await ws.send(json.dumps({"op": "subscribe", "args": topics}))
-                while True:
-                    raw = await ws.recv()
-                    data = json.loads(raw)
-                    topic = data.get("topic", "")
-                    if topic.startswith("allLiquidation") and data.get("data"):
-                        for itm in data["data"]:
-                            vol = float(itm["v"])
-                            if vol < limits.get(CHAT_ID, 100_000.0):
-                                continue
-                            ts = datetime.fromtimestamp(itm["T"]/1000).strftime("%Y-%m-%d %H:%M:%S")
-                            text = (
-                                f"💥 Ликвидация {itm['s']}\n"
-                                f"• Сторона: {itm['S']}\n"
-                                f"• Объём: ${vol:,.2f}\n"
-                                f"• Цена: {float(itm['p']):,.2f}\n"
-                                f"• Время: {ts}"
-                            )
-                            await bot.send_message(CHAT_ID, text)
-        except Exception as e:
-            print(f"WebSocket error: {e}. Reconnecting in 5s…")
-            await asyncio.sleep(5)
+    async with websockets.connect(EXCHANGE_WS) as ws:
+        await ws.send(json.dumps({"op": "subscribe", "args": ["liquidation"]}))
+        while True:
+            raw = await ws.recv()
+            data = json.loads(raw)
+            if data.get("topic") == "liquidation" and "data" in data:
+                for item in data["data"]:
+                    vol = float(item["qty"]) * float(item["price"])
+                    if vol < limits.get(CHAT_ID, 100_000.0):
+                        continue
+                    text = (
+                        f"💥 Ликвидация {item['symbol']}\n"
+                        f"• Сторона: {item['side']}\n"
+                        f"• Объём: ${vol:,.2f}\n"
+                        f"• Цена: {item['price']}\n"
+                        f"• Время: {item['time']}"
+                    )
+                    await bot.send_message(CHAT_ID, text)
 
-# ---- Startup & shutdown ----
-async def on_startup(dp_):
+# ---- Startup / Shutdown ----
+async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(liquidation_listener())
 
-async def on_shutdown(dp_):
+async def on_shutdown(dp):
     await bot.delete_webhook()
 
 # ---- Entry point ----
 if __name__ == "__main__":
-    executor.start_webhook(
+    start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
-        skip_updates=False,   # теперь бот обрабатывает все апдейты
+        skip_updates=True,
         on_startup=on_startup,
         on_shutdown=on_shutdown,
         host=WEBAPP_HOST,
         port=WEBAPP_PORT,
     )
+
