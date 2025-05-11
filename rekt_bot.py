@@ -26,7 +26,7 @@ WEBHOOK_URL  = WEBHOOK_HOST + WEBHOOK_PATH
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 5000))
 
-# V5 endpoint для USDT-фьючерсов
+# V5 endpoint for USDT futures
 EXCHANGE_WS = "wss://stream.bybit.com/v5/public/linear"
 
 # ---- FSM States ----
@@ -37,7 +37,7 @@ class ListSettings(StatesGroup):
     choosing_mode = State()
 
 # ---- In-memory storage ----
-limits     = {}  # chat_id -> float threshold
+limits     = {}  # chat_id -> float threshold in USD
 list_modes = {}  # chat_id -> str mode
 
 # ---- Bot & Dispatcher ----
@@ -79,19 +79,30 @@ async def cmd_start(msg: types.Message):
 @dp.callback_query_handler(lambda c: c.data == "set_limit")
 async def callback_set_limit(cq: types.CallbackQuery):
     await cq.answer()
-    await bot.send_message(cq.from_user.id, "Введите минимальный объём ликвидаций (USD):")
+    await bot.send_message(cq.from_user.id, "Введите минимальный объём ликвидаций (в тысячах USD). Например, 15 = $15 000:")
     await Settings.waiting_for_limit.set()
 
 @dp.message_handler(state=Settings.waiting_for_limit, content_types=types.ContentTypes.TEXT)
 async def process_limit(msg: types.Message, state: FSMContext):
-    text = msg.text.replace(",", "").replace("$", "")
+    text = msg.text.strip().lower().replace(",", "").replace("$", "")
     try:
-        value = float(text)
+        # if user ends with 'k', treat as thousands
+        if text.endswith('k'):
+            base = float(text[:-1])
+            value = base * 1_000
+        else:
+            value = float(text)
+            # if less than 1000, assume shorthand thousands
+            if value < 1000:
+                value = value * 1_000
         limits[msg.chat.id] = value
-        await msg.answer(f"✅ Порог установлен: от ${value:,.2f}", reply_markup=main_menu())
+        await msg.answer(
+            f"✅ Порог установлен: от ${value:,.2f}",
+            reply_markup=main_menu()
+        )
         await state.finish()
     except ValueError:
-        await msg.answer("❌ Не похоже на число. Попробуйте ещё раз:")
+        await msg.answer("❌ Не похоже на число. Введите, например, 15 или 15k:")
 
 @dp.callback_query_handler(lambda c: c.data == "set_list")
 async def callback_set_list(cq: types.CallbackQuery):
@@ -117,7 +128,7 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
 
 # ---- Liquidation listener with retry & V5 subscription ----
 async def liquidation_listener():
-    # Получаем список символов
+    # get USDT futures symbols
     try:
         resp = requests.get(
             "https://api.bybit.com/v5/market/instruments-info?category=linear"
@@ -129,7 +140,6 @@ async def liquidation_listener():
         symbols = []
 
     topics = [f"allLiquidation.{s}" for s in symbols]
-
     while True:
         try:
             async with websockets.connect(EXCHANGE_WS) as ws:
