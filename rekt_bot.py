@@ -15,13 +15,13 @@ import websockets
 
 # ---- Load environment ----
 load_dotenv()
-BOT_TOKEN    = os.getenv("BOT_TOKEN")      # 7306953549:...
-CHAT_ID      = int(os.getenv("CHAT_ID"))   # 1487834484
+BOT_TOKEN    = os.getenv("BOT_TOKEN")      # 7306953549:...  (Ваш токен)
+CHAT_ID      = int(os.getenv("CHAT_ID"))   # 1487834484    (Ваш CHAT_ID)
 WEBHOOK_HOST = os.getenv("WEBHOOK_URL")    # https://rekt-bot.onrender.com
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL  = WEBHOOK_HOST + WEBHOOK_PATH
 
-# Render port binding
+# Render provides port via $PORT
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 5000))
 
@@ -51,9 +51,8 @@ def main_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton("💲 Лимит ByBit", callback_data="set_limit"),
         InlineKeyboardButton("⚫️ Список ByBit", callback_data="set_list"),
     )
-    kb.add(
-        InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com")
-    )
+    # Coinglass link для швидкого доступу
+    kb.add(InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com"))
     return kb
 
 
@@ -70,7 +69,7 @@ def list_menu() -> InlineKeyboardMarkup:
 # ---- Handlers ----
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
-    print(f"🔔 Received /start from chat {msg.chat.id}")
+    # Ініціалізація значень
     limits[msg.chat.id]     = limits.get(msg.chat.id, 100_000.0)
     list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
     await msg.answer(
@@ -88,7 +87,7 @@ async def callback_set_limit(cq: types.CallbackQuery):
     )
     await Settings.waiting_for_limit.set()
 
-@dp.message_handler(state=Settings.waiting_for_limit)
+@dp.message_handler(state=Settings.waiting_for_limit, content_types=types.ContentTypes.TEXT)
 async def process_limit(msg: types.Message, state: FSMContext):
     text = msg.text.replace(',', '').replace('$', '').strip().lower()
     try:
@@ -107,9 +106,7 @@ async def process_limit(msg: types.Message, state: FSMContext):
 async def callback_set_list(cq: types.CallbackQuery):
     await cq.answer()
     await bot.send_message(
-        cq.from_user.id,
-        "Выберите режим списка ликвидаций:",
-        reply_markup=list_menu()
+        cq.from_user.id, "Выберите режим списка ликвидаций:", reply_markup=list_menu()
     )
     await ListSettings.choosing_mode.set()
 
@@ -120,13 +117,17 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
     if mode == "list_cancel":
         await bot.send_message(cq.from_user.id, "❌ Отмена.", reply_markup=main_menu())
     else:
-        desc = {
+        desc_map = {
             "list_all":      "🟡 Режим: все токены",
             "list_no_top20": "🟡 Режим: без топ 20",
             "list_no_top50": "🟡 Режим: без топ 50",
-        }[mode]
+        }
+        await bot.send_message(
+            cq.from_user.id,
+            f"✅ {desc_map[mode]}",
+            reply_markup=main_menu()
+        )
         list_modes[cq.from_user.id] = mode
-        await bot.send_message(cq.from_user.id, f"✅ {desc}", reply_markup=main_menu())
     await state.finish()
 
 # ---- WebSocket listener ----
@@ -144,17 +145,18 @@ async def liquidation_listener():
                             if vol < limits.get(CHAT_ID, 100_000.0):
                                 continue
                             symbol = itm["symbol"]
-                            cg_url = f"https://www.coinglass.com/liquidation/{symbol}"
+                            url = f"https://www.coinglass.com/liquidation/{symbol}"
                             ts = datetime.fromtimestamp(itm["time"]/1000).strftime("%Y-%m-%d %H:%M:%S")
                             text = (
-                                f"💥 Ликвидация <a href=\"{cg_url}\">{symbol}</a>\n"
+                                f"💥 Ликвидация <a href=\"{url}\">{symbol}</a>\n"
                                 f"• Сторона: {itm['side']}\n"
                                 f"• Объём: ${vol:,.2f}\n"
                                 f"• Цена: {itm['price']}\n"
                                 f"• Время: {ts}"
                             )
                             await bot.send_message(
-                                CHAT_ID, text,
+                                CHAT_ID,
+                                text,
                                 parse_mode=types.ParseMode.HTML,
                                 disable_web_page_preview=True
                             )
@@ -175,7 +177,7 @@ if __name__ == "__main__":
     start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
-        skip_updates=False,
+        skip_updates=True,
         on_startup=on_startup,
         on_shutdown=on_shutdown,
         host=WEBAPP_HOST,
