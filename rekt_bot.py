@@ -16,13 +16,15 @@ import websockets
 load_dotenv()
 BOT_TOKEN    = os.getenv("BOT_TOKEN")
 CHAT_ID      = int(os.getenv("CHAT_ID"))
-WEBHOOK_HOST = os.getenv("WEBHOOK_URL")      # https://your-app.onrender.com
+WEBHOOK_HOST = os.getenv("WEBHOOK_URL")      # e.g. "https://your-app.onrender.com"
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL  = WEBHOOK_HOST + WEBHOOK_PATH
 
+# Render provides port via $PORT
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 5000))
 
+# Bybit V2 public endpoint for liquidation
 EXCHANGE_WS = "wss://stream.bybit.com/realtime_public"
 
 # ---- FSM States ----
@@ -32,14 +34,14 @@ class Settings(StatesGroup):
 class ListSettings(StatesGroup):
     choosing_mode = State()
 
-# ---- Storage ----
-limits     = {}
-list_modes = {}
+# ---- In-memory storage ----
+limits     = {}  # chat_id -> float threshold in USD
+list_modes = {}  # chat_id -> str mode
 
-# ---- Bot init ----
-bot = Bot(token=BOT_TOKEN)
+# ---- Bot & Dispatcher ----
+bot     = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+dp      = Dispatcher(bot, storage=storage)
 
 # ---- Keyboards ----
 def main_menu() -> InlineKeyboardMarkup:
@@ -50,6 +52,7 @@ def main_menu() -> InlineKeyboardMarkup:
     )
     kb.add(InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com"))
     return kb
+
 
 def list_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
@@ -111,28 +114,33 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
         await bot.send_message(cq.from_user.id, f"✅ {desc}", reply_markup=main_menu())
     await state.finish()
 
-# ---- WebSocket listener ----
+# ---- Liquidation listener ----
 async def liquidation_listener():
-    async with websockets.connect(EXCHANGE_WS) as ws:
-        await ws.send(json.dumps({"op": "subscribe", "args": ["liquidation"]}))
-        while True:
-            raw = await ws.recv()
-            data = json.loads(raw)
-            if data.get("topic") == "liquidation" and "data" in data:
-                for item in data["data"]:
-                    vol = float(item["qty"]) * float(item["price"])
-                    if vol < limits.get(CHAT_ID, 100_000.0):
-                        continue
-                    text = (
-                        f"💥 Ликвидация {item['symbol']}\n"
-                        f"• Сторона: {item['side']}\n"
-                        f"• Объём: ${vol:,.2f}\n"
-                        f"• Цена: {item['price']}\n"
-                        f"• Время: {item['time']}"
-                    )
-                    await bot.send_message(CHAT_ID, text)
+    while True:
+        try:
+            async with websockets.connect(EXCHANGE_WS) as ws:
+                await ws.send(json.dumps({"op": "subscribe", "args": ["liquidation"]}))
+                while True:
+                    raw = await ws.recv()
+                    data = json.loads(raw)
+                    if data.get("topic") == "liquidation" and "data" in data:
+                        for item in data["data"]:
+                            vol = float(item["qty"]) * float(item["price"])
+                            if vol < limits.get(CHAT_ID, 100_000.0):
+                                continue
+                            text = (
+                                f"💥 Ликвидация {item['symbol']}\n"
+                                f"• Сторона: {item['side']}\n"
+                                f"• Объём: ${vol:,.2f}\n"
+                                f"• Цена: {item['price']}\n"
+                                f"• Время: {item['time']}"
+                            )
+                            await bot.send_message(CHAT_ID, text)
+        except Exception as e:
+            print(f"WebSocket error: {e}. Reconnecting in 5s…")
+            await asyncio.sleep(5)
 
-# ---- Startup / Shutdown ----
+# ---- Startup & shutdown ----
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(liquidation_listener())
@@ -151,4 +159,4 @@ if __name__ == "__main__":
         host=WEBAPP_HOST,
         port=WEBAPP_PORT,
     )
-
+    
