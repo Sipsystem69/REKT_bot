@@ -1,5 +1,5 @@
 services:
-  - type: web        # безкоштовний план
+  - type: worker
     name: REKT_bot
     env: python
     plan: free
@@ -10,5 +10,3 @@ services:
         value: "7306953549:AAGMkOmpUTtTWlWPjbavOcezeix0FoG3bG4"
       - key: CHAT_ID
         value: "1487834484"
-      - key: WEBHOOK_URL
-        value: "https://rekt-bot.onrender.com"
