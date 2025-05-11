@@ -45,16 +45,6 @@ bot     = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp      = Dispatcher(bot, storage=storage)
 
-# ---- Catch-all for debugging callbacks ----
-@dp.callback_query_handler()
-async def catch_all(cq: types.CallbackQuery):
-    try:
-        await cq.answer()
-    except Exception:
-        pass
-    print(f"🔔 Callback received: {cq.data}")
-    await bot.send_message(cq.from_user.id, "Выберите действие:", reply_markup=main_menu())
-
 # ---- Keyboards ----
 def main_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
@@ -185,7 +175,7 @@ if __name__ == "__main__":
     executor.start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
-        skip_updates=False,   # now processing all updates
+        skip_updates=False,   # теперь бот обрабатывает все апдейты
         on_startup=on_startup,
         on_shutdown=on_shutdown,
         host=WEBAPP_HOST,
