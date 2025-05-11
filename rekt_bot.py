@@ -51,7 +51,6 @@ def main_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton("💲 Лимит ByBit", callback_data="set_limit"),
         InlineKeyboardButton("⚫️ Список ByBit", callback_data="set_list"),
     )
-    # Manual reference link
     kb.add(
         InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com")
     )
@@ -71,16 +70,7 @@ def list_menu() -> InlineKeyboardMarkup:
 # ---- Handlers ----
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
-    print(f"🔔 Received /start from chat {msg.chat.id}")  # debug
-    limits[msg.chat.id]     = limits.get(msg.chat.id, 100_000.0)
-    list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
-    await msg.answer(
-        "Привет! Я сканирую ByBit на предмет ликвидаций.
-
-"
-        "Выберите действие:",
-        reply_markup=main_menu()
-    )(msg: types.Message):
+    print(f"🔔 Received /start from chat {msg.chat.id}")
     limits[msg.chat.id]     = limits.get(msg.chat.id, 100_000.0)
     list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
     await msg.answer(
@@ -92,11 +82,13 @@ async def cmd_start(msg: types.Message):
 @dp.callback_query_handler(lambda c: c.data == "set_limit")
 async def callback_set_limit(cq: types.CallbackQuery):
     await cq.answer()
-    await bot.send_message(cq.from_user.id,
-        "Введите минимальный объём ликвидаций (USD). Например, 15000 или 15k → $15 000:")
+    await bot.send_message(
+        cq.from_user.id,
+        "Введите минимальный объём ликвидаций (USD). Например, 15000 или 15k → $15 000:"
+    )
     await Settings.waiting_for_limit.set()
 
-@dp.message_handler(state=Settings.waiting_for_limit, content_types=types.ContentTypes.TEXT)
+@dp.message_handler(state=Settings.waiting_for_limit)
 async def process_limit(msg: types.Message, state: FSMContext):
     text = msg.text.replace(',', '').replace('$', '').strip().lower()
     try:
@@ -114,8 +106,11 @@ async def process_limit(msg: types.Message, state: FSMContext):
 @dp.callback_query_handler(lambda c: c.data == "set_list")
 async def callback_set_list(cq: types.CallbackQuery):
     await cq.answer()
-    await bot.send_message(cq.from_user.id,
-        "Выберите режим списка ликвидаций:", reply_markup=list_menu())
+    await bot.send_message(
+        cq.from_user.id,
+        "Выберите режим списка ликвидаций:",
+        reply_markup=list_menu()
+    )
     await ListSettings.choosing_mode.set()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("list_"), state=ListSettings.choosing_mode)
@@ -180,7 +175,7 @@ if __name__ == "__main__":
     start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
-        skip_updates=True,
+        skip_updates=False,
         on_startup=on_startup,
         on_shutdown=on_shutdown,
         host=WEBAPP_HOST,
