@@ -27,7 +27,7 @@ WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 5000))
 
 # Bybit public liquidation endpoint (V2)
-EXCHANGE_WS = "wss://stream.bybit.com/realtime_public"
+EXCHANGE_WS = "wss://stream.bybit.com/realtime"
 
 # ---- FSM States ----
 class Settings(StatesGroup):
@@ -141,7 +141,6 @@ async def liquidation_listener():
                             if vol < limits.get(CHAT_ID, 100_000.0):
                                 continue
                             symbol = itm["symbol"]
-                            # hyperlink to Coinglass for this instrument
                             cg_url = f"https://www.coinglass.com/liquidation/{symbol}"
                             ts = datetime.fromtimestamp(itm["time"]/1000).strftime("%Y-%m-%d %H:%M:%S")
                             text = (
