@@ -37,7 +37,6 @@ storage = MemoryStorage()
 dp      = Dispatcher(bot, storage=storage)
 
 # ---- Keyboards ----
-
 def main_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
@@ -48,7 +47,6 @@ def main_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com")
     )
     return kb
-
 
 def list_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
