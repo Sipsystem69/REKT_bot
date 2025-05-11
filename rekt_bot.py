@@ -45,6 +45,18 @@ bot     = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp      = Dispatcher(bot, storage=storage)
 
+# ---- Catch-all for debugging callbacks ----
+@dp.callback_query_handler()
+async def catch_all(cq: types.CallbackQuery):
+    # answer immediately to acknowledge the callback
+    try:
+        await cq.answer()
+    except:
+        pass
+    print(f"🔔 Callback received: {cq.data}")
+    # show main menu as a fallback
+    await bot.send_message(cq.from_user.id, "Выберите действие:", reply_markup=main_menu())
+
 # ---- Keyboards ----
 def main_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
@@ -54,14 +66,13 @@ def main_menu() -> InlineKeyboardMarkup:
     )
     return kb
 
-
 def list_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
-        InlineKeyboardButton("🟡 Все токены",    callback_data="list_all"),
-        InlineKeyboardButton("🟡 Без топ 20",   callback_data="list_no_top20"),
-        InlineKeyboardButton("🟡 Без топ 50",   callback_data="list_no_top50"),
-        InlineKeyboardButton("❌ Отмена",       callback_data="list_cancel"),
+        InlineKeyboardButton("🟡 Все токены",  callback_data="list_all"),
+        InlineKeyboardButton("🟡 Без топ 20", callback_data="list_no_top20"),
+        InlineKeyboardButton("🟡 Без топ 50", callback_data="list_no_top50"),
+        InlineKeyboardButton("❌ Отмена",     callback_data="list_cancel"),
     )
     return kb
 
@@ -79,27 +90,21 @@ async def cmd_start(msg: types.Message):
 @dp.callback_query_handler(lambda c: c.data == "set_limit")
 async def callback_set_limit(cq: types.CallbackQuery):
     await cq.answer()
-    await bot.send_message(cq.from_user.id, "Введите минимальный объём ликвидаций (в тысячах USD). Например, 15 = $15 000:")
+    await bot.send_message(cq.from_user.id,
+        "Введите минимальный объём ликвидаций (в тысячах USD). Например, 15 или 15k → $15 000:")
     await Settings.waiting_for_limit.set()
 
 @dp.message_handler(state=Settings.waiting_for_limit, content_types=types.ContentTypes.TEXT)
 async def process_limit(msg: types.Message, state: FSMContext):
     text = msg.text.strip().lower().replace(",", "").replace("$", "")
     try:
-        # if user ends with 'k', treat as thousands
-        if text.endswith('k'):
-            base = float(text[:-1])
-            value = base * 1_000
+        if text.endswith("k"):
+            value = float(text[:-1]) * 1_000
         else:
-            value = float(text)
-            # if less than 1000, assume shorthand thousands
-            if value < 1000:
-                value = value * 1_000
+            num = float(text)
+            value = num * 1_000 if num < 1_000 else num
         limits[msg.chat.id] = value
-        await msg.answer(
-            f"✅ Порог установлен: от ${value:,.2f}",
-            reply_markup=main_menu()
-        )
+        await msg.answer(f"✅ Порог установлен: от ${value:,.2f}", reply_markup=main_menu())
         await state.finish()
     except ValueError:
         await msg.answer("❌ Не похоже на число. Введите, например, 15 или 15k:")
@@ -107,7 +112,8 @@ async def process_limit(msg: types.Message, state: FSMContext):
 @dp.callback_query_handler(lambda c: c.data == "set_list")
 async def callback_set_list(cq: types.CallbackQuery):
     await cq.answer()
-    await bot.send_message(cq.from_user.id, "Выберите режим списка ликвидаций:", reply_markup=list_menu())
+    await bot.send_message(cq.from_user.id,
+        "Выберите режим списка ликвидаций:", reply_markup=list_menu())
     await ListSettings.choosing_mode.set()
 
 @dp.callback_query_handler(lambda c: c.data.startswith("list_"), state=ListSettings.choosing_mode)
@@ -128,22 +134,24 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
 
 # ---- Liquidation listener with retry & V5 subscription ----
 async def liquidation_listener():
-    # get USDT futures symbols
+    # 1) fetch all USDT futures symbols
     try:
         resp = requests.get(
             "https://api.bybit.com/v5/market/instruments-info?category=linear"
         )
         resp.raise_for_status()
-        symbols = [item["symbol"] for item in resp.json()["result"]["list"]]
+        symbols = [itm["symbol"] for itm in resp.json()["result"]["list"]]
     except Exception as err:
         print(f"❌ Ошибка получения символов: {err}")
         symbols = []
 
     topics = [f"allLiquidation.{s}" for s in symbols]
+
     while True:
         try:
             async with websockets.connect(EXCHANGE_WS) as ws:
-                await ws.send(json.dumps({"op":"subscribe","args":topics}))
+                # subscribe
+                await ws.send(json.dumps({"op": "subscribe", "args": topics}))
                 while True:
                     raw = await ws.recv()
                     data = json.loads(raw)
@@ -153,12 +161,13 @@ async def liquidation_listener():
                             vol = float(itm["v"])
                             if vol < limits.get(CHAT_ID, 100_000.0):
                                 continue
+                            ts = datetime.fromtimestamp(itm["T"]/1000).strftime("%Y-%m-%d %H:%M:%S")
                             text = (
                                 f"💥 Ликвидация {itm['s']}\n"
                                 f"• Сторона: {itm['S']}\n"
                                 f"• Объём: ${vol:,.2f}\n"
-                                f"• Цена: {float(itm['p'])}\n"
-                                f"• Время: {datetime.fromtimestamp(itm['T']/1000)}"
+                                f"• Цена: {float(itm['p']):,.2f}\n"
+                                f"• Время: {ts}"
                             )
                             await bot.send_message(CHAT_ID, text)
         except Exception as e:
@@ -178,7 +187,7 @@ if __name__ == "__main__":
     executor.start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
-        skip_updates=True,
+        skip_updates=False,   # теперь бот обрабатывает все апдейты
         on_startup=on_startup,
         on_shutdown=on_shutdown,
         host=WEBAPP_HOST,
