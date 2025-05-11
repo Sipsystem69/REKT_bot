@@ -1,11 +1,14 @@
 services:
-  - type: web           # бесплатный план
-    name: rekt_bot      # теперь совпадает с именем скрипта
+  - type: web        # безкоштовний план
+    name: REKT_bot
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python rekt_bot.py
     envVars:
       - key: BOT_TOKEN
+        value: "7306953549:AAGMkOmpUTtTWlWPjbavOcezeix0FoG3bG4"
       - key: CHAT_ID
+        value: "1487834484"
       - key: WEBHOOK_URL
+        value: "https://rekt-bot.onrender.com"

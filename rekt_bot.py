@@ -15,9 +15,9 @@ import websockets
 
 # ---- Load environment ----
 load_dotenv()
-BOT_TOKEN    = os.getenv("BOT_TOKEN")
-CHAT_ID      = int(os.getenv("CHAT_ID"))
-WEBHOOK_HOST = os.getenv("WEBHOOK_URL")      # https://your-app.onrender.com
+BOT_TOKEN    = os.getenv("BOT_TOKEN")      # 7306953549:...
+CHAT_ID      = int(os.getenv("CHAT_ID"))   # 1487834484
+WEBHOOK_HOST = os.getenv("WEBHOOK_URL")    # https://rekt-bot.onrender.com
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_URL  = WEBHOOK_HOST + WEBHOOK_PATH
 
