@@ -3,7 +3,6 @@
 import os
 import asyncio
 import json
-import requests
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils.executor import start_webhook
@@ -26,8 +25,8 @@ WEBHOOK_URL  = WEBHOOK_HOST + WEBHOOK_PATH
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", 5000))
 
-# Bybit public liquidation endpoint (V2)
-EXCHANGE_WS = "wss://stream.bybit.com/realtime"
+# Bybit public liquidation endpoint (V2 public)
+EXCHANGE_WS = "wss://stream.bybit.com/realtime_public"
 
 # ---- FSM States ----
 class Settings(StatesGroup):
@@ -52,7 +51,7 @@ def main_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton("💲 Лимит ByBit", callback_data="set_limit"),
         InlineKeyboardButton("⚫️ Список ByBit", callback_data="set_list"),
     )
-    # Coinglass link for manual reference
+    # Manual reference link
     kb.add(
         InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com")
     )
@@ -72,7 +71,6 @@ def list_menu() -> InlineKeyboardMarkup:
 # ---- Handlers ----
 @dp.message_handler(commands=["start"])
 async def cmd_start(msg: types.Message):
-    # Initialize defaults
     limits[msg.chat.id]     = limits.get(msg.chat.id, 100_000.0)
     list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
     await msg.answer(
@@ -85,10 +83,10 @@ async def cmd_start(msg: types.Message):
 async def callback_set_limit(cq: types.CallbackQuery):
     await cq.answer()
     await bot.send_message(cq.from_user.id,
-        "Введите минимальный объём ликвидаций (USD). Например, 15000 или 15k → $15 000:")
+        "Введите минимальный объём ликвидаций (USD). Например, 15000 или 15k → $15 000:")
     await Settings.waiting_for_limit.set()
 
-@dp.message_handler(state=Settings.waiting_for_limit)
+@dp.message_handler(state=Settings.waiting_for_limit, content_types=types.ContentTypes.TEXT)
 async def process_limit(msg: types.Message, state: FSMContext):
     text = msg.text.replace(',', '').replace('$', '').strip().lower()
     try:
@@ -126,7 +124,7 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
         await bot.send_message(cq.from_user.id, f"✅ {desc}", reply_markup=main_menu())
     await state.finish()
 
-# ---- WebSocket liquidation listener ----
+# ---- WebSocket listener ----
 async def liquidation_listener():
     while True:
         try:
@@ -135,8 +133,8 @@ async def liquidation_listener():
                 while True:
                     raw = await ws.recv()
                     data = json.loads(raw)
-                    if data.get("topic") == "liquidation":
-                        for itm in data.get("data", []):
+                    if data.get("topic") == "liquidation" and data.get("data"):
+                        for itm in data["data"]:
                             vol = float(itm["qty"]) * float(itm["price"])
                             if vol < limits.get(CHAT_ID, 100_000.0):
                                 continue
@@ -156,10 +154,10 @@ async def liquidation_listener():
                                 disable_web_page_preview=True
                             )
         except Exception as e:
-            print(f"WS error: {e}. Reconnecting in 5s…")
+            print(f"WebSocket error: {e}. Reconnecting in 5s…")
             await asyncio.sleep(5)
 
-# ---- Startup / shutdown ----
+# ---- Startup & shutdown ----
 async def on_startup(dp):
     await bot.set_webhook(WEBHOOK_URL)
     asyncio.create_task(liquidation_listener())
