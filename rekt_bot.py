@@ -48,13 +48,11 @@ dp      = Dispatcher(bot, storage=storage)
 # ---- Catch-all for debugging callbacks ----
 @dp.callback_query_handler()
 async def catch_all(cq: types.CallbackQuery):
-    # answer immediately to acknowledge the callback
     try:
         await cq.answer()
-    except:
+    except Exception:
         pass
     print(f"🔔 Callback received: {cq.data}")
-    # show main menu as a fallback
     await bot.send_message(cq.from_user.id, "Выберите действие:", reply_markup=main_menu())
 
 # ---- Keyboards ----
@@ -64,7 +62,11 @@ def main_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton("💲 Лимит ByBit", callback_data="set_limit"),
         InlineKeyboardButton("⚫️ Список ByBit", callback_data="set_list"),
     )
+    kb.add(
+        InlineKeyboardButton("🔗 Coinglass", url="https://www.coinglass.com")
+    )
     return kb
+
 
 def list_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
@@ -132,9 +134,8 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
         await bot.send_message(cq.from_user.id, f"✅ {desc}", reply_markup=main_menu())
     await state.finish()
 
-# ---- Liquidation listener with retry & V5 subscription ----
+# ---- Liquidation listener ----
 async def liquidation_listener():
-    # 1) fetch all USDT futures symbols
     try:
         resp = requests.get(
             "https://api.bybit.com/v5/market/instruments-info?category=linear"
@@ -144,13 +145,10 @@ async def liquidation_listener():
     except Exception as err:
         print(f"❌ Ошибка получения символов: {err}")
         symbols = []
-
     topics = [f"allLiquidation.{s}" for s in symbols]
-
     while True:
         try:
             async with websockets.connect(EXCHANGE_WS) as ws:
-                # subscribe
                 await ws.send(json.dumps({"op": "subscribe", "args": topics}))
                 while True:
                     raw = await ws.recv()
@@ -187,7 +185,7 @@ if __name__ == "__main__":
     executor.start_webhook(
         dispatcher=dp,
         webhook_path=WEBHOOK_PATH,
-        skip_updates=False,   # теперь бот обрабатывает все апдейты
+        skip_updates=False,   # now processing all updates
         on_startup=on_startup,
         on_shutdown=on_shutdown,
         host=WEBAPP_HOST,
