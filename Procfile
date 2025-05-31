@@ -1,0 +1,1 @@
+worker: python rekt_bot_working.py
