@@ -59,7 +59,7 @@ async def cmd_start(msg: types.Message):
     limits[msg.chat.id] = limits.get(msg.chat.id, 100_000.0)
     list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
     await msg.answer(
-        "Привіт! Я сканую Bybit на предмет ліквідацій.
+        "Привіт! Я сканую Bybit на предмет ліквідацій.n\n\"
 
 "
         "Виберіть дію:",
