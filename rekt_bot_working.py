@@ -105,10 +105,8 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
 
 async def get_mock_orderflow(symbol: str) -> str:
     return (
-        "📊 *Delta*: -12M → +4M (розворот)
-"
-        "📈 *CVD*: зростає після хвилі ліквідацій
-"
+        "📊 *Delta*: -12M → +4M (розворот)\n"
+        "📈 *CVD*: зростає після хвилі ліквідацій\n"
         "📉 *OI*: впав, потім пішов у ріст"
     )
 
