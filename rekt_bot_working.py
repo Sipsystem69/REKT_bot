@@ -1,6 +1,4 @@
 
-# rekt_bot_working.py
-
 import os
 import asyncio
 import json
@@ -13,7 +11,6 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from dotenv import load_dotenv
 import websockets
 
-# ---- Load environment ----
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
@@ -59,7 +56,9 @@ async def cmd_start(msg: types.Message):
     limits[msg.chat.id] = limits.get(msg.chat.id, 100_000.0)
     list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
     await msg.answer(
-        "Привіт! Я сканую Bybit на предмет ліквідацій.n\n\Виберіть дію:",
+        "Привіт! Я сканую Bybit на предмет ліквідацій.
+
+Виберіть дію:",
         reply_markup=main_menu()
     )
 
@@ -107,12 +106,11 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
     await state.finish()
 
 async def get_mock_orderflow(symbol: str) -> str:
-    # Псевдодані — можна замінити реальним API
     return (
-        "📊 *Delta*: -12M → +4M (розворот)\n"
-
-        "📈 *CVD*: зростає після хвилі ліквідацій\n"
-
+        "📊 *Delta*: -12M → +4M (розворот)
+"
+        "📈 *CVD*: зростає після хвилі ліквідацій
+"
         "📉 *OI*: впав, потім пішов у ріст"
     )
 
@@ -134,7 +132,6 @@ async def liquidation_listener():
                             url = f"https://www.coinglass.com/liquidation/{symbol}"
                             side = "🔴 Long" if itm["side"] == "Sell" else "🟢 Short"
                             orderflow = await get_mock_orderflow(symbol)
-
                             text = (
                                 f"💥 *Ліквідації на {symbol}*
 "
