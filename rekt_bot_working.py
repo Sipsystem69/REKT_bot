@@ -129,15 +129,10 @@ async def liquidation_listener():
                             side = "🔴 Long" if itm["side"] == "Sell" else "🟢 Short"
                             orderflow = await get_mock_orderflow(symbol)
                             text = (
-                                f"💥 *Ліквідації на {symbol}*
-"
-                                f"{side} | ${vol:,.2f} @ {itm['price']}
-"
-                                f"🕒 {ts} UTC
-"
-                                f"{orderflow}
-
-"
+                                f"💥 *Ліквідації на {symbol}*"
+                                f"{side} | ${vol:,.2f} @ {itm['price']}"
+                                f"🕒 {ts} UTC"
+                                f"{orderflow}"
                                 f"[Переглянути на Coinglass]({url})"
                             )
                             await bot.send_message(
