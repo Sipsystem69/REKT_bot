@@ -59,7 +59,9 @@ async def cmd_start(msg: types.Message):
     limits[msg.chat.id] = limits.get(msg.chat.id, 100_000.0)
     list_modes[msg.chat.id] = list_modes.get(msg.chat.id, "list_all")
     await msg.answer(
-        "Привіт! Я сканую Bybit на предмет ліквідацій.n\nВиберіть дію:",
+        "Привіт! Я сканую Bybit на предмет ліквідацій.
+        "Привіт! Я сканую Bybit на предмет ліквідацій.\n\nВиберіть дію:",
+Виберіть дію:",
         reply_markup=main_menu()
     )
 
@@ -108,6 +110,10 @@ async def process_list_choice(cq: types.CallbackQuery, state: FSMContext):
 
 async def get_mock_orderflow(symbol: str) -> str:
     return (
+        "📊 *Delta*: -12M → +4M (розворот)\n"
+        "📈 *CVD*: зростає після хвилі ліквідацій\n"
+        "📉 *OI*: впав, потім пішов у ріст"
+    )
         "📊 *Delta*: -12M → +4M (розворот)
 "
         "📈 *CVD*: зростає після хвилі ліквідацій
