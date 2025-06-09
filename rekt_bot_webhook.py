@@ -61,7 +61,6 @@ async def cmd_start(msg: types.Message):
     await msg.answer(
         "Привіт! Я сканую Bybit на предмет ліквідацій."
         "Привіт! Я сканую Bybit на предмет ліквідацій.\n\nВиберіть дію:",
-Виберіть дію:",
         reply_markup=main_menu()
     )
 
