@@ -115,8 +115,7 @@ async def get_mock_orderflow(symbol: str) -> str:
     )
     "📊 *Delta*: -12M → +4M (розворот)"
     "📈 *CVD*: зростає після хвилі ліквідацій"
-    "📉 *OI*: впав, потім пішов у ріст"
-    )
+    "📉 *OI*: впав, потім пішов у ріст" 
 
 async def liquidation_listener():
     while True:
